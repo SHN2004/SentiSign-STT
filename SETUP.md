@@ -115,6 +115,22 @@ The new detection system uses the MediaPipe worker subprocess for landmark extra
 uv run detect_signs.py
 ```
 
+### ASL Sign Detection + Sentence Generation (Ollama)
+
+This variant buffers detected words and, on keypress, sends them to a local Ollama model to generate sentence variations.
+
+```bash
+# Uses OLLAMA_MODEL if set, otherwise defaults to granite3.3:2b
+uv run detect_signs_sentences.py
+```
+
+**Controls (sentence mode):**
+- `a` add current locked word
+- `s` generate 3 sentence variations
+- `b` backspace last word
+- `c` clear words/output
+- `q` quit
+
 **Features:**
 - Real-time ASL sign recognition from webcam
 - Uses `model_66landmarks.tflite` + `label_mappings.json`

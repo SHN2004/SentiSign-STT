@@ -98,6 +98,13 @@ SentiSign-STT uses a transformer-based deep learning model trained on the Kaggle
 uv run detect_signs.py
 ```
 
+**Sentence generation (Ollama, local):**
+```bash
+# Uses OLLAMA_MODEL if set, otherwise defaults to granite3.3:2b
+uv run detect_signs_sentences.py
+```
+Keys: `a` add word, `s` generate, `b` backspace, `c` clear, `q` quit.
+
 **Optional MediaPipe tuning (worker):**
 ```bash
 MP_MIN_DET_CONF=0.6 MP_MIN_TRACK_CONF=0.6 uv run detect_signs.py
