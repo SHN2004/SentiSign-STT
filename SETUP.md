@@ -122,6 +122,14 @@ uv run detect_signs.py
 - Visual landmark overlay
 - Confidence scores
 
+**MediaPipe tuning (optional):**
+
+You can adjust Holistic detection/tracking thresholds via environment variables (read by `mp_worker.py`):
+
+```bash
+MP_MIN_DET_CONF=0.6 MP_MIN_TRACK_CONF=0.6 uv run detect_signs.py
+```
+
 **Controls:**
 - Press 'q' to quit
 

@@ -183,3 +183,19 @@ uv run detect_signs.py
 - Reduce camera resolution (e.g., 640×480)
 - Skip drawing every frame if needed
 - Keep prediction interval conservative on slower machines
+
+## MediaPipe tuning
+
+The worker reads these environment variables to tune MediaPipe Holistic:
+
+- `MP_MIN_DET_CONF` (default `0.5`): `min_detection_confidence`
+- `MP_MIN_TRACK_CONF` (default `0.5`): `min_tracking_confidence`
+
+Example:
+```bash
+MP_MIN_DET_CONF=0.6 MP_MIN_TRACK_CONF=0.6 uv run detect_signs.py
+```
+
+## Docs lookup (Context7)
+
+This environment supports Context7 MCP for up-to-date library documentation and code snippets (e.g., MediaPipe, TensorFlow, OpenCV). Ask the assistant to “use Context7 for <library>” when you want authoritative API examples.
