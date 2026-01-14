@@ -12,12 +12,23 @@ import time
 import os
 import subprocess
 import struct
+from collections import deque
 
 # ==================== CONFIGURATION ====================
 INPUT_SIZE = 64          # Max sequence length (frames)
 N_COLS = 66              # Number of selected landmarks
 N_DIMS = 3               # x, y, z coordinates
-PREDICTION_INTERVAL = 3  # Seconds between predictions
+
+# Rolling inference configuration (lower latency than fixed 3s windows)
+BUFFER_SIZE = 64               # Number of frames kept for inference
+MIN_FRAMES_FOR_INFERENCE = 16  # Don't predict until enough frames observed
+INFER_EVERY_N_FRAMES = 4       # Run inference every N captured frames
+
+# Prediction stabilization (EMA + hysteresis)
+EMA_ALPHA = 0.8               # Higher = smoother, slower to react
+ENTER_CONFIDENCE = 0.60       # Lock a sign once stable and above this
+EXIT_CONFIDENCE = 0.45        # Unlock if locked sign falls below this
+STABILITY_COUNT = 3           # Require same top sign this many inferences
 
 # ==================== LANDMARK INDICES ====================
 # Lip landmarks (40 points) from MediaPipe face mesh
@@ -135,6 +146,7 @@ class SignDetector:
         with open(labels_path, 'r') as f:
             mappings = json.load(f)
         self.ord2sign = {int(k): v for k, v in mappings['ord2sign'].items()}
+        self.sign2ord = {k: int(v) for k, v in mappings['sign2ord'].items()}
 
         # Initialize MediaPipe worker subprocess
         self.mp_worker = MediaPipeWorker()
@@ -335,6 +347,14 @@ class SignDetector:
 
         return self.ord2sign[pred_idx], confidence
 
+    def predict_proba(self, frames, frame_idxs):
+        """Run inference and return full probability vector."""
+        self.interpreter.set_tensor(self._input_index_by_key['frames'], frames)
+        self.interpreter.set_tensor(self._input_index_by_key['frame_idxs'], frame_idxs)
+        self.interpreter.invoke()
+        output = self.interpreter.get_tensor(self.output_details[0]['index'])
+        return output[0]
+
     def cleanup(self):
         """Close worker process."""
         self.mp_worker.close()
@@ -357,11 +377,18 @@ class SignDetector:
         display_width = frame_width + 400  # Extra space for text
 
         # State variables
-        raw_frames = []
+        frame_buffer = deque(maxlen=BUFFER_SIZE)
+        frame_count = 0
         start_time = time.time()
-        last_prediction_time = start_time
         current_sign = "Waiting..."
         current_confidence = 0.0
+        ema_proba = None
+        candidate_sign = None
+        candidate_count = 0
+        locked_sign = None
+        locked_sign_below_count = 0
+        last_reported_sign = None
+        last_reported_lock = None
 
         # Font settings
         font = cv2.FONT_HERSHEY_SIMPLEX
@@ -381,18 +408,73 @@ class SignDetector:
 
                 # Extract landmarks using worker subprocess
                 landmarks = self.mp_worker.extract_landmarks(image)
-                raw_frames.append(landmarks)
+                frame_buffer.append(landmarks)
+                frame_count += 1
 
-                # Make prediction every PREDICTION_INTERVAL seconds
-                if current_time - last_prediction_time >= PREDICTION_INTERVAL:
-                    if len(raw_frames) > 10:  # Need minimum frames
-                        frames, frame_idxs = self.preprocess(raw_frames)
-                        if frames is not None:
-                            current_sign, current_confidence = self.predict(frames, frame_idxs)
+                should_infer = (
+                    frame_count % INFER_EVERY_N_FRAMES == 0
+                    and len(frame_buffer) >= MIN_FRAMES_FOR_INFERENCE
+                )
+
+                if should_infer:
+                    frames, frame_idxs = self.preprocess(list(frame_buffer))
+                    if frames is not None:
+                        proba = self.predict_proba(frames, frame_idxs)
+                        if ema_proba is None:
+                            ema_proba = proba.astype(np.float32, copy=True)
+                        else:
+                            ema_proba = (EMA_ALPHA * ema_proba) + ((1.0 - EMA_ALPHA) * proba)
+
+                        pred_idx = int(np.argmax(ema_proba))
+                        pred_sign = self.ord2sign[pred_idx]
+                        pred_conf = float(ema_proba[pred_idx])
+
+                        if locked_sign is None:
+                            if candidate_sign == pred_sign:
+                                candidate_count += 1
+                            else:
+                                candidate_sign = pred_sign
+                                candidate_count = 1
+
+                            if candidate_count >= STABILITY_COUNT and pred_conf >= ENTER_CONFIDENCE:
+                                locked_sign = pred_sign
+                                locked_sign_below_count = 0
+                        else:
+                            locked_idx = None
+                            locked_idx = self.sign2ord.get(locked_sign)
+
+                            if locked_idx is not None:
+                                locked_conf = float(ema_proba[int(locked_idx)])
+                                if locked_conf < EXIT_CONFIDENCE:
+                                    locked_sign_below_count += 1
+                                else:
+                                    locked_sign_below_count = 0
+
+                                if locked_sign_below_count >= STABILITY_COUNT:
+                                    locked_sign = None
+                                    candidate_sign = None
+                                    candidate_count = 0
+                                    locked_sign_below_count = 0
+
+                        if locked_sign is not None:
+                            current_sign = locked_sign
+                            locked_idx = self.sign2ord.get(locked_sign)
+                            if locked_idx is not None:
+                                current_confidence = float(ema_proba[int(locked_idx)])
+                            else:
+                                current_confidence = pred_conf
+                        else:
+                            current_sign = pred_sign
+                            current_confidence = pred_conf
+
+                        lock_state = locked_sign is not None
+                        if (
+                            current_sign != last_reported_sign
+                            or lock_state != last_reported_lock
+                        ):
                             print(f"Detected: {current_sign} ({current_confidence:.1%})")
-
-                    raw_frames = []
-                    last_prediction_time = current_time
+                            last_reported_sign = current_sign
+                            last_reported_lock = lock_state
 
                 # Draw landmarks on image
                 display_image = self.draw_landmarks(image.copy(), landmarks)
@@ -419,24 +501,17 @@ class SignDetector:
                 cv2.putText(display, f"Confidence: {current_confidence:.1%}", (panel_x, 200),
                             font, 0.6, (200, 200, 200), 1)
 
-                # Progress bar for next prediction
-                time_to_next = PREDICTION_INTERVAL - (current_time - last_prediction_time)
-                progress = 1 - (time_to_next / PREDICTION_INTERVAL)
-                bar_width = 200
-                bar_height = 20
-                cv2.rectangle(display, (panel_x, 240), (panel_x + bar_width, 240 + bar_height),
-                              (100, 100, 100), -1)
-                cv2.rectangle(display, (panel_x, 240), (panel_x + int(bar_width * progress), 240 + bar_height),
-                              (0, 200, 0), -1)
-                cv2.putText(display, f"Next prediction: {time_to_next:.1f}s", (panel_x, 285),
+                # Rolling inference status
+                lock_status = "LOCKED" if locked_sign is not None else "UNLOCKED"
+                cv2.putText(display, f"Mode: rolling ({lock_status})", (panel_x, 240),
                             font, 0.5, (150, 150, 150), 1)
 
                 # Elapsed time
-                cv2.putText(display, f"Elapsed: {int(elapsed)}s", (panel_x, 330),
+                cv2.putText(display, f"Elapsed: {int(elapsed)}s", (panel_x, 285),
                             font, 0.5, (150, 150, 150), 1)
 
                 # Frames collected
-                cv2.putText(display, f"Frames: {len(raw_frames)}", (panel_x, 360),
+                cv2.putText(display, f"Buffer: {len(frame_buffer)}/{BUFFER_SIZE}", (panel_x, 315),
                             font, 0.5, (150, 150, 150), 1)
 
                 # Instructions
