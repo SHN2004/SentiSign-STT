@@ -127,6 +127,7 @@ uv run detect_signs_sentences.py
 **Controls (sentence mode):**
 - `a` add current locked word
 - `s` generate 3 sentence variations
+- Arrow keys (or `j`/`k` / `1`–`3`) select a sentence
 - `b` backspace last word
 - `c` clear words/output
 - `q` quit

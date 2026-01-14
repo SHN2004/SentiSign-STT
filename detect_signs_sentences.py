@@ -31,6 +31,13 @@ MIN_SECONDS_BETWEEN_SAME_WORD = 2.0
 MAX_WORDS = 20
 
 MAX_EXTRA_WORDS_PER_SENTENCE = 6
+HEDGE_WORDS = {
+    "seems",
+    "seem",
+    "looks",
+    "look",
+    "like",
+}
 
 PROMPT_TEMPLATE = """You are helping convert ASL sign detections into natural English.
 
@@ -38,9 +45,16 @@ Input words (in order): {words}
 
 Task:
 - Produce exactly 3 different sentence variations.
-- Use the input words as the core content words; you may reorder or omit some if needed.
+- Use the input words as the core meaning; you may reorder or omit some if needed.
 - You MAY add a few extra words to make it grammatical, but keep additions minimal.
+- Avoid narration/hedging like: "it seems", "looks like", "I see", "you seem".
 - Keep each sentence short (aim for <= 10 words) and avoid extra descriptive details.
+- If the input expresses a speaker state/need (e.g., hungry, thirsty, tired) and no subject is given, default to first-person ("I am ...").
+
+Variation requirements:
+1) A direct first-person statement (starts with "I ...", can optionally include a greeting).
+2) A direct question to the listener (prefer starting with "Are you ..." or "Do you ..."). Do not use "it seems/looks like".
+3) Another direct first-person statement (a different wording from #1).
 
 Output format (exactly 3 lines):
 1. <sentence>
@@ -109,6 +123,8 @@ def _minimalize_sentence(sentence: str, *, allowed_words: list[str]) -> str:
             continue
 
         lower = stripped.lower()
+        if lower in HEDGE_WORDS:
+            continue
         if lower in allowed_lower:
             tokens.append(lower)
             continue
@@ -148,6 +164,26 @@ def _format_ollama_output(raw: str, *, allowed_words: list[str]) -> str:
     return "1. " + cleaned[0] + "\n2. " + cleaned[1] + "\n3. " + cleaned[2]
 
 
+def _extract_three_sentences(text: str) -> list[str]:
+    lines = [l for l in (text or "").splitlines() if l.strip()]
+    out: list[str] = []
+    for l in lines:
+        l = _strip_leading_numbering(l)
+        if l:
+            out.append(l)
+        if len(out) == 3:
+            break
+    while len(out) < 3:
+        out.append("")
+    return out[:3]
+
+
+def _wrap_index(idx: int, length: int) -> int:
+    if length <= 0:
+        return 0
+    return idx % length
+
+
 class SentenceSignDetector(ds.SignDetector):
     def __init__(self, *, ollama_model: str, enable_ollama: bool):
         super().__init__()
@@ -165,6 +201,8 @@ class SentenceSignDetector(ds.SignDetector):
         self._gen_status: str = "Idle"
         self._gen_output: str = ""
         self._gen_error: str = ""
+        self._sentences: list[str] = ["", "", ""]
+        self._selected_sentence_idx = 0
 
         if self.enable_ollama:
             self._start_warmup()
@@ -235,6 +273,8 @@ class SentenceSignDetector(ds.SignDetector):
             self._gen_status = "Generating..."
             self._gen_error = ""
             self._gen_output = ""
+            self._sentences = ["", "", ""]
+            self._selected_sentence_idx = 0
 
             prompt = PROMPT_TEMPLATE.format(
                 words=" ".join(self.words),
@@ -247,11 +287,17 @@ class SentenceSignDetector(ds.SignDetector):
                         prompt=prompt,
                         timeout_s=OLLAMA_TIMEOUT_SECONDS,
                     )
-                    self._gen_output = _format_ollama_output(out, allowed_words=self.words)
-                    self._gen_status = "Done"
+                    formatted = _format_ollama_output(out, allowed_words=self.words)
+                    sentences = _extract_three_sentences(formatted)
+                    with self._gen_lock:
+                        self._gen_output = formatted
+                        self._sentences = sentences
+                        self._selected_sentence_idx = 0
+                        self._gen_status = "Done"
                 except Exception as e:  # noqa: BLE001
-                    self._gen_error = str(e)
-                    self._gen_status = "Error"
+                    with self._gen_lock:
+                        self._gen_error = str(e)
+                        self._gen_status = "Error"
 
             self._gen_thread = threading.Thread(target=_worker, daemon=True)
             self._gen_thread.start()
@@ -285,7 +331,7 @@ class SentenceSignDetector(ds.SignDetector):
         font = cv2.FONT_HERSHEY_SIMPLEX
 
         print("\nSign Detection + Sentence Generation Started")
-        print("Keys: q quit | a add word | s generate | c clear | b backspace")
+        print("Keys: q quit | a add word | s generate | c clear | b backspace | arrows/jk/1-3 select")
         print("-" * 60)
 
         try:
@@ -412,24 +458,42 @@ class SentenceSignDetector(ds.SignDetector):
                     cv2.putText(display, "Sentences:", (panel_x, y),
                                 font, 0.55, (255, 255, 255), 1)
                     y += line_h
-                    for wl in _wrap_text(self._gen_output, width=32)[:9]:
-                        cv2.putText(display, wl, (panel_x, y),
-                                    font, 0.45, (220, 220, 220), 1)
-                        y += line_h
+
+                    selected = _wrap_index(self._selected_sentence_idx, 3)
+                    for idx, sentence in enumerate(self._sentences[:3]):
+                        prefix = f"{idx + 1}. "
+                        is_selected = idx == selected
+                        color = (0, 255, 255) if is_selected else (220, 220, 220)
+                        label = ("> " if is_selected else "  ") + prefix + (sentence or "")
+                        for wl in _wrap_text(label, width=32)[:2]:
+                            cv2.putText(display, wl, (panel_x, y),
+                                        font, 0.45, color, 1)
+                            y += line_h
+
+                    y += 6
+                    cv2.putText(display, f"Selected: {selected + 1}", (panel_x, y),
+                                font, 0.5, (0, 255, 255), 1)
+                    y += line_h
 
                 cv2.putText(display, "q quit | a add word | s generate | c clear | b backspace",
                             (panel_x, frame_height - 30),
                             font, 0.45, (120, 120, 120), 1)
+                cv2.putText(display, "arrows/jk/1-3 select", (panel_x, frame_height - 10),
+                            font, 0.45, (120, 120, 120), 1)
 
                 cv2.imshow("ASL Sign Detection (Sentences)", display)
 
-                key = cv2.waitKey(5) & 0xFF
-                if key == ord("q"):
+                key = cv2.waitKeyEx(5)
+                if key == -1:
+                    continue
+
+                key_char = key & 0xFF
+                if key_char == ord("q"):
                     break
-                if key == ord("a"):
+                if key_char == ord("a"):
                     if locked_sign is not None:
                         self._maybe_add_word(locked_sign, now)
-                if key == ord("c"):
+                if key_char == ord("c"):
                     self.words.clear()
                     self._last_word = None
                     self._last_word_time = 0.0
@@ -437,7 +501,9 @@ class SentenceSignDetector(ds.SignDetector):
                     self._gen_output = ""
                     self._gen_error = ""
                     self._gen_status = "Idle"
-                if key == ord("b"):
+                    self._sentences = ["", "", ""]
+                    self._selected_sentence_idx = 0
+                if key_char == ord("b"):
                     if self.words:
                         removed = self.words.pop()
                         if removed == self._last_word:
@@ -445,7 +511,26 @@ class SentenceSignDetector(ds.SignDetector):
                     self._gen_output = ""
                     self._gen_error = ""
                     self._gen_status = "Idle"
-                if key == ord("s"):
+                    self._sentences = ["", "", ""]
+                    self._selected_sentence_idx = 0
+
+                # Sentence selection (works even after generation)
+                up_keys = {2490368, 63232, 65362}
+                down_keys = {2621440, 63233, 65364}
+                left_keys = {2424832, 63234, 65361}
+                right_keys = {2555904, 63235, 65363}
+
+                if key in up_keys or key in left_keys or key_char in {ord("k")}:
+                    if any(self._sentences):
+                        self._selected_sentence_idx = _wrap_index(self._selected_sentence_idx - 1, 3)
+                if key in down_keys or key in right_keys or key_char in {ord("j")}:
+                    if any(self._sentences):
+                        self._selected_sentence_idx = _wrap_index(self._selected_sentence_idx + 1, 3)
+                if key_char in {ord("1"), ord("2"), ord("3")}:
+                    if any(self._sentences):
+                        self._selected_sentence_idx = int(chr(key_char)) - 1
+
+                if key_char == ord("s"):
                     self._start_generation()
 
         finally:

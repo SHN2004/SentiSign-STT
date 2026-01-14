@@ -104,6 +104,7 @@ uv run detect_signs.py
 uv run detect_signs_sentences.py
 ```
 Keys: `a` add word, `s` generate, `b` backspace, `c` clear, `q` quit.
+Select sentence: arrow keys (or `j`/`k` / `1`–`3`).
 
 **Optional MediaPipe tuning (worker):**
 ```bash
