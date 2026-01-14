@@ -77,7 +77,7 @@ def main():
                     stderr.write("End of input stream\n")
                     break
 
-                height, width = struct.unpack('ii', header)
+                height, width = struct.unpack('<ii', header)
 
                 # Read frame data
                 frame_size = height * width * 3

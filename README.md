@@ -4,7 +4,7 @@ Real-time American Sign Language (ASL) recognition system using deep learning an
 
 ## Features
 
-- **Real-time ASL Recognition**: Detect and recognize ASL gestures at ~20-30 FPS
+- **Real-time ASL Recognition**: Detect and recognize ASL gestures from a live webcam feed
 - **Dual Environment Architecture**: Isolates TensorFlow and MediaPipe dependencies to resolve version conflicts
 - **TensorFlow Lite Model**: Fast, efficient inference on CPU
 - **MediaPipe Holistic**: Accurate landmark extraction for hands, face, and pose
@@ -19,12 +19,12 @@ SentiSign-STT uses a transformer-based deep learning model trained on the Kaggle
 ### Dual Environment Architecture
 
 **The Problem:**
-- TensorFlow 2.20+ requires `protobuf >= 6.x` (currently 6.33.3)
-- Legacy MediaPipe 0.10.14 requires `protobuf < 5.x` (specifically 4.25.8)
+- TensorFlow 2.20+ requires `protobuf >= 6.x` (6.x series)
+- Legacy MediaPipe 0.10.14 requires `protobuf < 5.x` (4.x series)
 - These versions are incompatible in the same environment
 
 **The Solution:**
-- **Main Environment (.venv)**: Runs Python 3.11 with TensorFlow 2.20.0 and MediaPipe 0.10.31
+- **Main Environment (.venv)**: Runs Python 3.11+ with TensorFlow and modern MediaPipe (uv-managed)
 - **Worker Environment (mp_env)**: Runs Python 3.10 with MediaPipe 0.10.14 for Holistic detection
 - **Communication**: Subprocess communicates via stdin/stdout using a binary protocol
 - **Isolation**: Complete dependency separation prevents version conflicts
@@ -32,13 +32,13 @@ SentiSign-STT uses a transformer-based deep learning model trained on the Kaggle
 ## Tech Stack
 
 ### Core Technologies
-- **Python 3.11.13** (main application)
-- **Python 3.10.19** (MediaPipe worker)
-- **TensorFlow 2.20.0**: Deep learning framework
-- **MediaPipe 0.10.31**: Modern version (main environment)
+- **Python 3.11+** (main application)
+- **Python 3.10** (MediaPipe worker)
+- **TensorFlow 2.20+**: Deep learning framework
+- **MediaPipe 0.10.31+**: Modern version (main environment)
 - **MediaPipe 0.10.14**: Legacy version with Holistic support (worker)
-- **OpenCV 4.12.0.88**: Computer vision and video capture
-- **NumPy 2.2.6**: Numerical computing
+- **OpenCV**: Computer vision and video capture
+- **NumPy**: Numerical computing
 
 ### Package Management
 - **uv**: Fast Python package manager for dependency management
@@ -47,7 +47,7 @@ SentiSign-STT uses a transformer-based deep learning model trained on the Kaggle
 
 ### Prerequisites
 
-- **Python 3.10.19** and **Python 3.11.13**
+- **Python 3.10** and **Python 3.11+**
 - **uv** package manager
 - **macOS** or **Linux** (tested on macOS)
 
@@ -80,12 +80,15 @@ SentiSign-STT uses a transformer-based deep learning model trained on the Kaggle
 5. **Verify installations:**
    ```bash
    # Check main environment
-   uv run python -c "import tensorflow; print(f'TensorFlow: {tensorflow.__version__}')"
-   # Expected: TensorFlow: 2.20.0
+   uv run python -c "import tensorflow, mediapipe; print(f'TF: {tensorflow.__version__}, MP: {mediapipe.__version__}')"
 
    # Check worker environment
    mp_env/bin/python -c "import mediapipe; print(f'MediaPipe: {mediapipe.__version__}')"
    # Expected: MediaPipe: 0.10.14
+
+   # Check protobuf versions (main vs worker)
+   uv run python -c "import google.protobuf; print(f'protobuf: {google.protobuf.__version__}')"
+   mp_env/bin/python -c "import google.protobuf; print(f'protobuf: {google.protobuf.__version__}')"
    ```
 
 ### Running the Application
@@ -100,6 +103,8 @@ uv run detect_signs.py
 uv run app.py
 ```
 
+**Note:** `app.py` is a legacy pipeline and may not run out-of-the-box with the current `pyproject.toml` dependencies. It also expects additional files (e.g. `model.tflite`, `train.csv`) that are not currently present in this repo.
+
 **Train Model:**
 ```bash
 uv run jupyter notebook ASL_Model_Training.ipynb
@@ -111,16 +116,16 @@ uv run jupyter notebook ASL_Model_Training.ipynb
 SentiSign-STT/
 ├── detect_signs.py          # Main ASL detection app with worker subprocess
 ├── mp_worker.py             # MediaPipe Holistic worker (runs in mp_env)
-├── app.py                  # Legacy application (original version)
+├── app.py                   # Legacy application (Gemini + Parquet pipeline)
 ├── model_66landmarks.tflite # TensorFlow Lite model (66 landmarks)
 ├── label_mappings.json      # Sign name mappings
 ├── pyproject.toml           # uv dependency configuration
-├── AGENTS.md               # Coding guidelines and developer documentation
-├── SETUP.md                # Detailed setup and troubleshooting guide
-└── README.md               # This file
+├── AGENTS.md                # Coding guidelines and developer documentation
+├── SETUP.md                 # Detailed setup and troubleshooting guide
+└── README.md                # This file
 
 Virtual Environments:
-├── .venv/                  # Main environment (Python 3.11, TensorFlow 2.20)
+├── .venv/                  # Main environment (Python 3.11+, TensorFlow 2.20+)
 └── mp_env/                 # Worker environment (Python 3.10, MediaPipe 0.10.14)
 
 Training:
@@ -137,7 +142,7 @@ Training:
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Main Process (.venv)                    │
-│  Python 3.11.13 │ TensorFlow 2.20.0 │ MediaPipe 0.10.31  │
+│  Python 3.11+ │ TensorFlow 2.20+ │ MediaPipe 0.10.31+     │
 │                                                              │
 │  ┌──────────────┐      ┌──────────────┐      ┌──────────┐ │
 │  │ Webcam       │─────▶│ SignDetector │─────▶│ TFLite   │ │
@@ -154,7 +159,7 @@ Training:
           ▼
 ┌─────────────────────────────────────────────────────────────┐
 │              Worker Process (mp_env)                       │
-│  Python 3.10.19 │ MediaPipe 0.10.14 │ protobuf 4.25.8   │
+│  Python 3.10.x │ MediaPipe 0.10.14 │ protobuf 4.x        │
 │                                                              │
 │  ┌──────────────┐      ┌──────────────┐      ┌──────────┐ │
 │  │ Frame Data   │─────▶│ MediaPipe    │─────▶│ Landmarks│ │
@@ -178,8 +183,8 @@ Training:
 **Main → Worker:**
 ```
 Header: 8 bytes
-  - height: 4 bytes (int32, little-endian)
-  - width: 4 bytes (int32, little-endian)
+  - height: 4 bytes (int32)
+  - width: 4 bytes (int32)
 
 Frame: N bytes
   - N = height × width × 3 (BGR pixel data, uint8)
@@ -205,8 +210,8 @@ Landmarks: 6,516 bytes
 
 ### Controls
 
-- **'q'**: Quit application
-- **ESC**: Toggle sentence display (legacy app)
+- `detect_signs.py`: **q** quits
+- `app.py` (legacy): **ESC** toggles Gemini sentence display, **q** quits
 
 ### Detection Loop
 
@@ -220,7 +225,7 @@ Landmarks: 6,516 bytes
 
 ### Model Performance
 
-- **Frame Rate**: 20-30 FPS (depends on CPU)
+- **Frame Rate**: depends on CPU/camera resolution
 - **Prediction Interval**: Every 3 seconds
 - **Confidence Threshold**: Displays confidence for each prediction
 - **Model Size**: 2.6 MB (TensorFlow Lite)
@@ -260,7 +265,7 @@ For detailed troubleshooting, see [SETUP.md](SETUP.md).
 - **CPU**: 2 cores, 2.0 GHz
 - **RAM**: 4 GB
 - **OS**: macOS 10.15+, Ubuntu 20.04+
-- **Python**: 3.10.19 and 3.11.13
+- **Python**: 3.10 and 3.11+
 
 ### Recommended
 - **CPU**: 4+ cores, 2.5+ GHz
@@ -280,7 +285,7 @@ The model is trained on the Kaggle Google Isolated Sign Language Recognition (GI
 **Model Details:**
 - **Architecture**: Transformer-based
 - **Input**: 64 frames × 66 landmarks × 3 coordinates (x, y, z)
-- **Output**: 250+ ASL sign classes
+- **Output**: 250 ASL sign classes
 - **Training**: Pre-trained on GISLR dataset
 
 ## Additional Documentation

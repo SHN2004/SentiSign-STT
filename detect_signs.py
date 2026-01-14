@@ -101,7 +101,7 @@ class MediaPipeWorker:
         height, width = frame_bgr.shape[:2]
 
         # Send header (dimensions) + frame data
-        header = struct.pack('ii', height, width)
+        header = struct.pack('<ii', height, width)
         self.process.stdin.write(header)
         self.process.stdin.write(frame_bgr.tobytes())
         self.process.stdin.flush()
@@ -129,6 +129,7 @@ class SignDetector:
         self.interpreter.allocate_tensors()
         self.input_details = self.interpreter.get_input_details()
         self.output_details = self.interpreter.get_output_details()
+        self._input_index_by_key = self._build_input_index_by_key(self.input_details)
 
         # Load label mappings
         with open(labels_path, 'r') as f:
@@ -140,6 +141,28 @@ class SignDetector:
 
         print(f"Model loaded: {model_path}")
         print(f"Labels loaded: {len(self.ord2sign)} signs")
+
+    @staticmethod
+    def _build_input_index_by_key(input_details):
+        index_by_key = {}
+
+        for inp in input_details:
+            name = str(inp.get('name', '')).lower()
+            idx = inp.get('index')
+            if idx is None:
+                continue
+
+            if 'frame_idxs' in name or 'frameidxs' in name:
+                index_by_key['frame_idxs'] = idx
+            elif 'frames' in name:
+                index_by_key['frames'] = idx
+
+        missing = [k for k in ('frames', 'frame_idxs') if k not in index_by_key]
+        if missing:
+            names = [d.get('name') for d in input_details]
+            raise RuntimeError(f"TFLite model inputs missing {missing}. Found inputs: {names}")
+
+        return index_by_key
 
     def draw_landmarks(self, image, landmarks):
         """Draw landmarks on the image using OpenCV."""
@@ -302,8 +325,8 @@ class SignDetector:
 
     def predict(self, frames, frame_idxs):
         """Run inference on preprocessed data."""
-        self.interpreter.set_tensor(self.input_details[0]['index'], frames)
-        self.interpreter.set_tensor(self.input_details[1]['index'], frame_idxs)
+        self.interpreter.set_tensor(self._input_index_by_key['frames'], frames)
+        self.interpreter.set_tensor(self._input_index_by_key['frame_idxs'], frame_idxs)
         self.interpreter.invoke()
 
         output = self.interpreter.get_tensor(self.output_details[0]['index'])

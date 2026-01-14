@@ -7,8 +7,8 @@ SentiSign-STT uses a **dual environment architecture** to resolve dependency con
 ### Why Two Environments?
 
 **The Problem:**
-- TensorFlow 2.20+ requires `protobuf >= 6.x` (currently 6.33.3)
-- Legacy MediaPipe 0.10.14 requires `protobuf < 5.x` (specifically 4.25.8)
+- TensorFlow 2.20+ requires `protobuf >= 6.x` (6.x series)
+- Legacy MediaPipe 0.10.14 requires `protobuf < 5.x` (4.x series)
 - These versions cannot coexist in the same Python environment
 
 **The Solution:**
@@ -19,8 +19,8 @@ SentiSign-STT uses a **dual environment architecture** to resolve dependency con
 
 ## Prerequisites
 
-- **Python 3.10.19** (for MediaPipe worker)
-- **Python 3.11.13** (for main application)
+- **Python 3.10.x** (for MediaPipe worker)
+- **Python 3.11+** (for main application)
 - **uv** package manager (for dependency management)
 - **macOS** or **Linux** (tested on macOS)
 
@@ -40,14 +40,14 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 The main environment runs the ASL detection application with TensorFlow and modern MediaPipe.
 
-**Python Version:** 3.11.13
+**Python Version:** 3.11+
 
 **Dependencies:**
-- tensorflow 2.20.0
-- mediapipe 0.10.31 (latest compatible version)
-- protobuf 6.33.3
-- numpy 2.2.6
-- opencv-python 4.12.0.88
+- tensorflow 2.20+
+- mediapipe 0.10.31+
+- protobuf 6.x
+- numpy
+- opencv-python
 
 **Setup Commands:**
 
@@ -57,20 +57,19 @@ uv sync
 
 # Verify installation
 uv run python -c "import tensorflow, mediapipe; print(f'TF: {tensorflow.__version__}, MP: {mediapipe.__version__}')"
-# Expected: TF: 2.20.0, MP: 0.10.31
 ```
 
 ### MediaPipe Worker Environment (mp_env)
 
 The worker environment runs legacy MediaPipe 0.10.14 with Holistic support.
 
-**Python Version:** 3.10.19
+**Python Version:** 3.10.x
 
 **Dependencies:**
 - mediapipe 0.10.14 (legacy version)
-- protobuf 4.25.8
-- numpy 2.2.6
-- opencv-python 4.12.0.88
+- protobuf 4.x
+- numpy
+- opencv-python
 
 **Setup Commands:**
 
@@ -92,12 +91,12 @@ Check both environments are correctly configured:
 
 ```bash
 # Check main environment (.venv)
-uv run python -c "import protobuf; print(f'protobuf: {protobuf.__version__}')"
-# Expected: protobuf: 6.33.3
+uv run python -c "import google.protobuf; print(f'protobuf: {google.protobuf.__version__}')"
+# Expected: protobuf 6.x
 
 # Check worker environment (mp_env)
-mp_env/bin/python -c "import protobuf; print(f'protobuf: {protobuf.__version__}')"
-# Expected: protobuf: 4.25.8
+mp_env/bin/python -c "import google.protobuf; print(f'protobuf: {google.protobuf.__version__}')"
+# Expected: protobuf 4.x
 
 # List all packages in .venv
 uv pip list --python .venv/bin/python
@@ -118,7 +117,7 @@ uv run detect_signs.py
 
 **Features:**
 - Real-time ASL sign recognition from webcam
-- Uses 66-landmark TensorFlow Lite model
+- Uses `model_66landmarks.tflite` + `label_mappings.json`
 - Predictions every 3 seconds
 - Visual landmark overlay
 - Confidence scores
@@ -134,7 +133,7 @@ The original application uses MediaPipe directly in the main environment.
 uv run app.py
 ```
 
-**Note:** This uses MediaPipe 0.10.31 and may have different behavior than the worker-based system.
+**Note:** `app.py` is a legacy pipeline and may not run out-of-the-box with the current `pyproject.toml` dependencies. It also expects additional files (e.g. `model.tflite`, `train.csv`) that are not currently present in this repo.
 
 ### Model Training
 
@@ -264,7 +263,7 @@ ls -la mp_env/bin/python
 
 # Check Python version in mp_env
 mp_env/bin/python --version
-# Expected: Python 3.10.19
+# Expected: Python 3.10.x
 
 # Check MediaPipe installation in mp_env
 mp_env/bin/python -c "import mediapipe; print(mediapipe.__version__)"
@@ -366,8 +365,9 @@ uv pip install --python mp_env/bin/python mediapipe==0.10.14 opencv-python numpy
 
 **Solution:**
 ```bash
-# This is expected - .venv uses MediaPipe 0.10.31 which has different API
-# Use the worker system instead for holistic detection
+# Reinstall main env deps and run the recommended worker-based pipeline
+uv sync
+uv run detect_signs.py
 ```
 
 ## Performance Notes
