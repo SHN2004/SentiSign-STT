@@ -10,6 +10,7 @@ Protocol:
 """
 import sys
 import struct
+import os
 import numpy as np
 import cv2
 import mediapipe as mp
@@ -62,9 +63,12 @@ def main():
     stderr.write("MediaPipe worker starting...\n")
     stderr.flush()
 
+    min_detection_confidence = float(os.getenv("MP_MIN_DET_CONF", "0.5"))
+    min_tracking_confidence = float(os.getenv("MP_MIN_TRACK_CONF", "0.5"))
+
     with mp_holistic.Holistic(
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5
+        min_detection_confidence=min_detection_confidence,
+        min_tracking_confidence=min_tracking_confidence,
     ) as holistic:
         stderr.write("Holistic model loaded, ready for frames\n")
         stderr.flush()
@@ -89,6 +93,7 @@ def main():
                 # Decode frame
                 frame = np.frombuffer(frame_bytes, dtype=np.uint8).reshape(height, width, 3)
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frame_rgb.flags.writeable = False
 
                 # Extract landmarks
                 landmarks = extract_landmarks(frame_rgb, holistic)
