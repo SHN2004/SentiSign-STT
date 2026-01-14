@@ -32,7 +32,7 @@ LIPS_IDXS = np.array([
 LEFT_HAND_IDXS = np.arange(468, 489)
 RIGHT_HAND_IDXS = np.arange(522, 543)
 
-# Pose landmarks (5 key points)
+# Pose landmarks (5 key points) - MUST match gislr-training(1).ipynb
 POSE_IDXS = np.array([489, 490, 492, 493, 494])
 
 # Combined indices for left and right hand variants
