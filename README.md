@@ -106,6 +106,14 @@ uv run detect_signs_sentences.py
 Keys: `a` add word, `s` generate, `b` backspace, `c` clear, `q` quit.
 Select sentence: arrow keys (or `j`/`k` / `1`–`3`).
 
+**Sign + Emotion overlay (sentences unchanged):**
+```bash
+# Requires temprepo/SentiSign (for the emotion model/code) and torch in the main env.
+uv sync
+uv run detect_signs_emotion_sentences.py
+```
+Defaults: flip on, CLAHE on. Quit: `q`.
+
 **Optional MediaPipe tuning (worker):**
 ```bash
 MP_MIN_DET_CONF=0.6 MP_MIN_TRACK_CONF=0.6 uv run detect_signs.py
